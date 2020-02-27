@@ -1,0 +1,5 @@
+[workspace] 
+members = [
+    "druid_enum_view",
+    "druid_enum_view_derive",
+]
