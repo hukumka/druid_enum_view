@@ -72,7 +72,7 @@ fn view_switcher_data_(input: DeriveInput) -> Result<TokenStream, Error>{
         mod #mod_name{
             use druid_enum_view::druid::{Data, Widget, widget::WidgetExt};
             use druid_enum_view::OptionWidget;
-            use super::{super::#ident, #(#variant_types),*};
+            use super::{#ident, #(#variant_types),*};
 
             #[derive(PartialEq)]
             pub enum #variant_enum_name{
@@ -96,7 +96,7 @@ fn view_switcher_data_(input: DeriveInput) -> Result<TokenStream, Error>{
                         };
                         let res = f(&mut opt_data);
                         match (opt_data, data){
-                            (Some(x), #repeat_ident::#variant_names(data)) if !x.same(data) => {
+                            (Some(x), #repeat_ident::#variant_names(data)) => {
                                 *data = x;
                             },
                             _ => {}
