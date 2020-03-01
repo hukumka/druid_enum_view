@@ -83,21 +83,23 @@ fn view_switcher_data_(input: DeriveInput) -> Result<TokenStream, Error>{
                 pub struct #lens_names;
                 impl druid::Lens<#repeat_ident, Option<#variant_types>> for #lens_names{
                     fn with<V, F: FnOnce(&Option<#variant_types>) -> V>(&self, data: &#repeat_ident, f: F) -> V {
-                        let data = match data{
+                        let data = match &data{
                             #repeat_ident::#variant_names(data) => Some(data.clone()),
                             _ => None
                         };
                         f(&data)
                     }
                     fn with_mut<V, F: FnOnce(&mut Option<#variant_types>) -> V>(&self, data: &mut #repeat_ident, f: F) -> V {
-                        let mut opt_data = match data{
+                        let mut opt_data = match &data{
                             #repeat_ident::#variant_names(data) => Some(data.clone()),
                             _ => None
                         };
                         let res = f(&mut opt_data);
-                        match (opt_data, data){
-                            (Some(x), #repeat_ident::#variant_names(data)) => {
-                                *data = x;
+                        match data{
+                            #repeat_ident::#variant_names(data) => {
+                                if let Some(x) = opt_data{
+                                    *data = x;
+                                }
                             },
                             _ => {}
                         }
