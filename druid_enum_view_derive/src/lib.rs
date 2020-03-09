@@ -1,169 +1,170 @@
 extern crate proc_macro;
 
-use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput, Error};
+use proc_macro2::{Ident, Span, TokenStream};
+use syn::{parse_macro_input, DeriveInput, Data, Type, Variant, Fields, Error, Attribute, parse::Parse, Path};
 
-#[proc_macro_derive(ViewSwitcherData)]
-pub fn derive_view_switcher_data(input: TokenStream) -> TokenStream{
+#[proc_macro_derive(EnumViewData, attributes(enum_view))]
+pub fn derive_view_switcher_data(input: proc_macro::TokenStream) -> proc_macro::TokenStream{
     let input: DeriveInput = parse_macro_input!(input as DeriveInput);
 
     match view_switcher_data_(input){
-        Ok(tt) => tt,
+        Ok(tt) => tt.into(),
         Err(e) => e.to_compile_error().into()
     }
 }
 
-fn view_switcher_data_(input: DeriveInput) -> Result<TokenStream, Error>{
-    let enum_ = if let syn::Data::Enum(enum_) = input.data{
-        enum_   
+fn view_switcher_data_(input: DeriveInput) -> Result<TokenStream, Error> {
+    let widget_name: Ident = get_attr(&input.attrs)?;
+    let enum_ = if let Data::Enum(data) = &input.data{
+        data
     }else{
-        return Err(Error::new_spanned(input, "Only enums supported!"));
+        return Err(Error::new(Span::call_site(), "Data must be enum"));
     };
+    let variant_names: Vec<&Ident> = enum_.variants
+        .iter()
+        .map(|x| &x.ident)
+        .collect();
+    let variant_view_builders: Result<Vec<Path>, Error> = enum_.variants
+        .iter()
+        .map(|x| {
+            let path: Path = get_attr(&x.attrs)?;
+            Ok(path)
+        }).collect();
+    let variant_types: Result<Vec<&Type>, Error> = enum_.variants
+        .iter()
+        .map(get_variant_type)
+        .collect();
+    let variant_view_builders = variant_view_builders?;
+    let variant_types = variant_types?;
+    let widget = generate_widget(&widget_name, &input.ident, &variant_names, &variant_view_builders, &variant_types);
+    let implementation = generate_impl(&input.ident, &variant_names);
+    Ok(quote! {
+        #widget
+        #implementation
+    })
+}
 
-    // Get variants
-    let mut variant_names = vec![];
-    let mut variant_types = vec![];
-    let mut errors = vec![];
-    for var in enum_.variants.iter(){
-        match get_variant(var){
-            Ok((name, type_)) => {
-                variant_names.push(name);
-                variant_types.push(type_);
-            },
-            Err(e) => {
-                errors.push(e);
+fn get_variant_type(variant: &Variant) -> Result<&Type, Error>{
+    match &variant.fields{
+        Fields::Unnamed(var) if var.unnamed.len() == 1 => {
+            let field = var.unnamed.first().unwrap();
+            Ok(&field.ty)
+        },
+        _ => Err(Error::new(Span::call_site(), "Expected single unnamed parameter"))
+    }
+}
+
+fn generate_widget(name: &Ident, enum_ident: &Ident, variants: &[&Ident], view_builders: &[Path], types: &[&Type]) -> TokenStream {
+    let enum_ident_repeat: Vec<_> = std::iter::repeat(enum_ident).take(variants.len()).collect();
+    let name_repeat: Vec<_> = std::iter::repeat(name).take(variants.len()).collect();
+    let res = quote! {
+        enum #name{
+            Uninit,
+            #(
+            #variants(druid::WidgetPod<#types, Box<dyn druid::Widget<#types>>>),
+            )*
+        }
+
+        impl #name{
+            fn new() -> Self{
+                Self::Uninit
+            }
+
+            fn update_widget(&mut self, data: &#enum_ident) {
+                match data{
+                    #(
+                    #enum_ident_repeat::#variants(_) => {
+                        let widget = Box::new(#view_builders());
+                        *self = #name_repeat::#variants(druid::WidgetPod::new(widget));
+                    },
+                    )*
+                }
             }
         }
-    }
-    combine_errors(errors)?;
 
-    // generate code
-    let size = variant_names.len();
-    let ident = input.ident.clone();
-    let mod_name = format!("mod{}", to_snake_case(&input.ident.to_string()));
-    let mod_name = syn::Ident::new(&mod_name, ident.span());
-    let variant_enum_name = syn::Ident::new(&format!("_Variant{}", input.ident.to_string()), ident.span());
-    let repeat_ident: Vec<_> = std::iter::repeat(ident.clone()).take(size).collect();
-    let repeat_variant_enum_name: Vec<_> = std::iter::repeat(variant_enum_name.clone()).take(size).collect();
-    let lens_names: Vec<_> = variant_names.iter().map(|s| syn::Ident::new(&format!("{}Lens", s), ident.span())).collect();
-
-    let res = quote!{
-        impl druid_enum_view::druid::Data for #ident {
-            fn same(&self, other: &Self) -> bool {
-                match (self, other){
+        impl druid::Widget<#enum_ident> for #name{
+            fn lifecycle(&mut self, ctx: &mut druid::LifeCycleCtx, event: &druid::LifeCycle, data: &#enum_ident, env: &druid::Env) {
+                if let druid::LifeCycle::WidgetAdded = event{
+                    self.update_widget(data);
+                }
+                match (self, data) {
                     #(
-                        (#repeat_ident::#variant_names(a), #repeat_ident::#variant_names(b)) => a.same(&b),
+                    (#name_repeat::#variants(ref mut widget), #enum_ident_repeat::#variants(data)) => widget.lifecycle(ctx, event, data, env),
                     )*
+                    _ => {},
+                }
+            }
+
+            fn event(&mut self, ctx: &mut druid::EventCtx, event: &druid::Event, data: &mut #enum_ident, env: &druid::Env) {
+                match (self, data) {
+                    #(
+                    (#name_repeat::#variants(ref mut widget), #enum_ident_repeat::#variants(data)) => widget.event(ctx, event, data, env),
+                    )*
+                    _ => {},
+                }
+            }
+
+            fn update(&mut self, ctx: &mut druid::UpdateCtx, old_data: &#enum_ident, data: &#enum_ident, env: &druid::Env) {
+                match (self, data) {
+                    #(
+                    (#name_repeat::#variants(ref mut widget), #enum_ident_repeat::#variants(data)) => widget.update(ctx, data, env),
+                    )*
+                    (s, data)=> {
+                        s.update_widget(data);
+                        ctx.children_changed();
+                    },
+                }
+            }
+
+            fn layout(&mut self, ctx: &mut druid::LayoutCtx, bc: &druid::BoxConstraints, data: &#enum_ident, env: &druid::Env) -> druid::Size {
+                match (self, data) {
+                    #(
+                    (#name_repeat::#variants(ref mut widget), #enum_ident_repeat::#variants(data)) => {
+                        let size = widget.layout(ctx, bc, data, env);
+                        widget.set_layout_rect(druid::Rect::from_origin_size(druid::Point::ORIGIN, size));
+                        size
+                    },
+                    )*
+                    _ => {
+                        bc.max()
+                    },
+                }
+            }
+
+            fn paint(&mut self, paint_ctx: &mut druid::PaintCtx, data: &#enum_ident, env: &druid::Env) {
+                match (self, data) {
+                    #(
+                    (#name_repeat::#variants(ref mut widget), #enum_ident_repeat::#variants(data)) => widget.paint(paint_ctx, data, env),
+                    )*
+                    _ => {}
+                }
+            }
+        }
+    };
+    res
+}
+
+fn generate_impl(ident: &Ident, variants: &[&Ident]) -> TokenStream {
+    quote!{
+        impl druid::Data for #ident{
+            fn same(&self, other: &Self) -> bool {
+                match (self, other) {
+                    #((#ident::#variants(a), #ident::#variants(b)) => a.same(b),)*
                     _ => false,
                 }
             }
         }
-
-        impl #ident {
-            pub fn build_widget() -> impl druid::Widget<Self> {
-                druid::widget::ViewSwitcher::new(
-                    |data, _env| {#mod_name::#variant_enum_name::new(data)},
-                    #mod_name::#variant_enum_name::child_builder
-                )
-            }
-        }
-
-        mod #mod_name{
-            use druid_enum_view::druid::{Data, Widget, widget::WidgetExt};
-            use druid_enum_view::OptionWidget;
-            use super::{#ident, #(#variant_types),*};
-
-            #[derive(PartialEq)]
-            pub enum #variant_enum_name{
-                #(#variant_names),*
-            }
-
-            #(
-                pub struct #lens_names;
-                impl druid::Lens<#repeat_ident, Option<#variant_types>> for #lens_names{
-                    fn with<V, F: FnOnce(&Option<#variant_types>) -> V>(&self, data: &#repeat_ident, f: F) -> V {
-                        let data = match &data{
-                            #repeat_ident::#variant_names(data) => Some(data.clone()),
-                            _ => None
-                        };
-                        f(&data)
-                    }
-                    fn with_mut<V, F: FnOnce(&mut Option<#variant_types>) -> V>(&self, data: &mut #repeat_ident, f: F) -> V {
-                        let mut opt_data = match &data{
-                            #repeat_ident::#variant_names(data) => Some(data.clone()),
-                            _ => None
-                        };
-                        let res = f(&mut opt_data);
-                        match data{
-                            #repeat_ident::#variant_names(data) => {
-                                if let Some(x) = opt_data{
-                                    *data = x;
-                                }
-                            },
-                            _ => {}
-                        }
-                        res
-                    }
-                }
-            )*
-
-            impl #variant_enum_name{
-                pub fn new(base: &super::#ident) -> Self{
-                    match base{
-                        #(#repeat_ident::#variant_names(_) => #repeat_variant_enum_name::#variant_names),*
-                    }
-                }
-
-                pub fn child_builder(&self, env: &druid::Env) -> Box<dyn druid::Widget<super::#ident>>{
-                    match self{
-                        #(#repeat_variant_enum_name :: #variant_names 
-                            => {
-                                let widget = OptionWidget::new(super::#variant_types::build_widget()).lens(#lens_names);
-                                Box::new(widget)
-                            },)*
-                    }
-                }
-            }
-        }
-    };
-    //println!("{}", res.to_string());
-    Ok(res.into())
-}
-
-fn to_snake_case(from: &str) -> String{
-    let mut res = String::new();
-    for c in from.chars(){
-        if c.is_uppercase(){
-            res.push_str(&format!("_{}", c.to_lowercase()));
-        }else{
-            res.push(c);
-        }
-    }
-    res
-}
-
-fn combine_errors(data: impl IntoIterator<Item=Error>) -> Result<(), Error>{
-    let mut iter = data.into_iter();
-    if let Some(error) = iter.next(){
-        let mut error = error;
-        for e in iter{
-            error.combine(e);
-        }
-        Err(error)
-    }else{
-        Ok(())
     }
 }
 
-fn get_variant(var: &syn::Variant) -> Result<(syn::Ident, syn::Type), Error>{
-    if var.fields.len() != 1{
-        Err(Error::new_spanned(var, "Each variant must contain single values"))?;
-    }
-    let field = var.fields.iter().next().unwrap();
-    if field.ident.is_some(){
-        Err(Error::new_spanned(var, "Variants must not containt named fields"))?;
-    }
-    Ok((var.ident.clone(), field.ty.clone()))
+fn get_attr<T: Parse>(attrs: &[Attribute]) -> Result<T, Error> {
+    let attr = attrs
+        .iter()
+        .find(|x| {
+            let ident = Ident::new("enum_view", Span::call_site());
+            x.path.is_ident(&ident)
+        })
+        .ok_or_else(|| syn::Error::new(Span::call_site(), "Expected `#[enum_view(...)] attribute"))?;
+    attr.parse_args::<T>()
 }
-

@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 druid_enum_view_derive = {path = "../druid_enum_view_derive"}
 druid = {git = "https://github.com/xi-editor/druid"}
+log = "0.4"
