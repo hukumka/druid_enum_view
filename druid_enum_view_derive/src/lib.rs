@@ -74,8 +74,8 @@ fn generate_widget(name: &Ident, enum_ident: &Ident, variants: &[&Ident], view_b
             fn update_widget(&mut self, data: &#enum_ident) {
                 match data{
                     #(
-                    #enum_ident_repeat::#variants(_) => {
-                        let widget = Box::new(#view_builders());
+                    #enum_ident_repeat::#variants(value) => {
+                        let widget = Box::new(#view_builders(value));
                         *self = #name_repeat::#variants(druid::WidgetPod::new(widget));
                     },
                     )*

@@ -32,7 +32,7 @@ enum State {
     Stage1(String),
 }
 
-fn build_stage0() -> impl Widget<u32> {
+fn build_stage0(_value: &u32) -> impl Widget<u32> {
     Button::new(
         |data: &u32, _env: &_| format!("Count: {}", data),
         |_ctx, data: &mut u32, _| {
@@ -41,6 +41,6 @@ fn build_stage0() -> impl Widget<u32> {
     )
 }
 
-fn build_stage1() -> impl Widget<String> {
+fn build_stage1(_value: &String) -> impl Widget<String> {
     Label::new(|data: &String, _env: &_| data.clone())
 }
