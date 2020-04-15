@@ -26,6 +26,8 @@ fn build_ui() -> impl Widget<State> {
 enum State {
     Stage0(u32),
     Stage1(String),
+    #[cfg(feature="features")]
+    Stage2(String)
 }
 
 druid_enum_view!{
@@ -34,7 +36,10 @@ druid_enum_view!{
         #[build_stage0]
         Stage0(u32),
         #[build_stage1]
-        Stage1(String)
+        Stage1(String),
+        #[build_stage2]
+        #[cfg(feature="features")]
+        Stage2(String)
     }
 }
 
@@ -46,5 +51,9 @@ fn build_stage0() -> impl Widget<u32> {
 }
 
 fn build_stage1() -> impl Widget<String> {
+    Label::new(|data: &String, _env: &_| data.clone())
+}
+
+fn build_stage2() -> impl Widget<String> {
     Label::new(|data: &String, _env: &_| data.clone())
 }

@@ -3,6 +3,7 @@ macro_rules! druid_enum_view {
     ($vis: vis enum $widget_name: ident ($data_enum: ident) {
         $(
             #[$builder: expr]
+            $(#[$($t: tt)*])*
             $variant: ident ($variant_type: ty)
         ),*
     }) => {
@@ -10,6 +11,7 @@ macro_rules! druid_enum_view {
         $vis enum $widget_name {
             Uninit,
             $(
+            $(#[$($t)*])*
             $variant(druid::WidgetPod<$variant_type, Box<dyn druid::Widget<$variant_type>> >)
             ),*
         }
@@ -25,6 +27,7 @@ macro_rules! druid_enum_view {
             fn update_variant(&mut self, data: &$data_enum) {
                 match data {
                     $(
+                        $(#[$($t)*])*
                         $data_enum::$variant(value) => {
                             let widget = Box::new($builder());
                             *self = $widget_name::$variant(druid::WidgetPod::new(widget));
@@ -42,6 +45,7 @@ macro_rules! druid_enum_view {
                 }
                 match (self, data) {
                     $(
+                    $(#[$($t)*])*
                     ($widget_name::$variant(ref mut widget), $data_enum::$variant(data)) => widget.lifecycle(ctx, event, data, env),
                     )*
                     _ => {},
@@ -51,6 +55,7 @@ macro_rules! druid_enum_view {
             fn event(&mut self, ctx: &mut druid::EventCtx, event: &druid::Event, data: &mut $data_enum, env: &druid::Env) {
                 match (self, data) {
                     $(
+                    $(#[$($t)*])*
                     ($widget_name::$variant(ref mut widget), $data_enum::$variant(data)) => widget.event(ctx, event, data, env),
                     )*
                     _ => {},
@@ -60,6 +65,7 @@ macro_rules! druid_enum_view {
             fn update(&mut self, ctx: &mut druid::UpdateCtx, old_data: &$data_enum, data: &$data_enum, env: &druid::Env) {
                 match (self, data) {
                     $(
+                    $(#[$($t)*])*
                     ($widget_name::$variant(ref mut widget), $data_enum::$variant(data)) => widget.update(ctx, data, env),
                     )*
                     (s, data)=> {
@@ -72,6 +78,7 @@ macro_rules! druid_enum_view {
             fn layout(&mut self, ctx: &mut druid::LayoutCtx, bc: &druid::BoxConstraints, data: &$data_enum, env: &druid::Env) -> druid::Size {
                 match (self, data) {
                     $(
+                    $(#[$($t)*])*
                     ($widget_name::$variant(ref mut widget), $data_enum::$variant(data)) => {
                         let size = widget.layout(ctx, bc, data, env);
                         widget.set_layout_rect(druid::Rect::from_origin_size(druid::Point::ORIGIN, size));
@@ -87,6 +94,7 @@ macro_rules! druid_enum_view {
             fn paint(&mut self, paint_ctx: &mut druid::PaintCtx, data: &$data_enum, env: &druid::Env) {
                 match (self, data) {
                     $(
+                    $(#[$($t)*])*
                     ($widget_name::$variant(ref mut widget), $data_enum::$variant(data)) => widget.paint(paint_ctx, data, env),
                     )*
                     _ => {}
